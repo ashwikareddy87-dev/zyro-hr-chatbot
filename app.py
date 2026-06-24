@@ -13,8 +13,23 @@ st.title("💬 Zyro Dynamics HR Help Desk")
 
 CORPUS_PATH = "data/"
 
+# --- DEBUG BLOCK: shows exactly what files Streamlit Cloud can see ---
+st.subheader("🔍 Debug: Repo contents")
+st.write("Files in repo root:", os.listdir("."))
+if os.path.exists(CORPUS_PATH):
+    st.write(f"Files inside '{CORPUS_PATH}':", os.listdir(CORPUS_PATH))
+else:
+    st.error(f"'{CORPUS_PATH}' folder does NOT exist in this repo.")
+    st.stop()
+# --- END DEBUG BLOCK ---
+
 @st.cache_resource
 def load_pipeline():
+    pdf_files = [f for f in os.listdir(CORPUS_PATH) if f.lower().endswith(".pdf")]
+    if len(pdf_files) == 0:
+        st.error(f"No .pdf files found inside '{CORPUS_PATH}'. Upload the 11 HR policy PDFs there and redeploy.")
+        st.stop()
+
     loader = PyPDFDirectoryLoader(CORPUS_PATH)
     documents = loader.load()
 
