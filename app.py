@@ -15,21 +15,8 @@ CORPUS_PATH = "data/"
 
 @st.cache_resource
 def load_pipeline():
-    if not os.path.exists(CORPUS_PATH):
-        st.error(f"Folder '{CORPUS_PATH}' not found. Make sure 'data/' is in your repo root, next to app.py.")
-        st.stop()
-
-    pdf_files = [f for f in os.listdir(CORPUS_PATH) if f.lower().endswith(".pdf")]
-    if len(pdf_files) == 0:
-        st.error(f"No PDF files found inside '{CORPUS_PATH}'. Upload the 11 HR policy PDFs there.")
-        st.stop()
-
     loader = PyPDFDirectoryLoader(CORPUS_PATH)
     documents = loader.load()
-
-    if len(documents) == 0:
-        st.error("PDFs were found but could not be loaded. Check the files aren't corrupted.")
-        st.stop()
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     chunks = splitter.split_documents(documents)
@@ -42,4 +29,52 @@ def load_pipeline():
 
     rag_prompt = ChatPromptTemplate.from_template(
         "You are an HR assistant for Zyro Dynamics. Answer ONLY using the context below. "
-        "If the answer isn't in the context, say you
+        "If the answer isn't in the context, say you don't have that information.\n\n"
+        "Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+    )
+    oos_prompt = ChatPromptTemplate.from_template(
+        "Is the following question related to HR policies (leave, WFH, conduct, "
+        "performance, compensation, IT security, POSH, onboarding, travel)? "
+        "Answer only YES or NO.\n\nQuestion: {question}"
+    )
+    return retriever, llm, rag_prompt, oos_prompt
+
+retriever, llm, rag_prompt, oos_prompt = load_pipeline()
+
+def ask_bot(question):
+    check_chain = oos_prompt | llm | StrOutputParser()
+    verdict = check_chain.invoke({"question": question}).strip().upper()
+    if "NO" in verdict:
+        return "I can only answer HR-related questions from Zyro Dynamics policy documents.", []
+
+    docs = retriever.invoke(question)
+    context = "\n\n".join(d.page_content for d in docs)
+    chain = rag_prompt | llm | StrOutputParser()
+    answer = chain.invoke({"context": context, "question": question})
+    return answer, docs
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+if prompt := st.chat_input("Ask an HR question..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.write(prompt)
+
+    answer, sources = ask_bot(prompt)
+
+    with st.chat_message("assistant"):
+        st.write(answer)
+        if sources:
+            with st.expander("Sources"):
+                for i, doc in enumerate(sources, 1):
+                    page = doc.metadata.get("page", "?")
+                    source_file = doc.metadata.get("source", "unknown")
+                    st.write(f"**{i}.** {source_file} (page {page})")
+                    st.caption(doc.page_content[:200] + "...")
+
+    st.session_state.messages.append({"role": "assistant", "content": answer})
